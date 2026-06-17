@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Incremental de recherche scientifique — clicker thème laboratoire",
+  "packageManager": "pnpm@11.0.8",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
