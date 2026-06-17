@@ -1,5 +1,5 @@
 import type { AchievementDef, GameState } from "@/core/types";
-import { applyAutoClicks, totalProduction } from "@/core/economy";
+import { applyAutoClicks, gainRP, totalProduction } from "@/core/economy";
 import { metaAutoClicksPerSec } from "@/core/meta";
 import { evalCondition } from "@/core/state";
 import { saveState } from "@/core/save";
@@ -73,13 +73,17 @@ export class Engine {
   }
 
   private tick(dtSeconds: number): void {
-    // Chrono de run : temps actif uniquement (le hors-ligne ne compte pas).
+    // Chrono de run + temps total joué (temps actif uniquement).
     this.state.runMs += dtSeconds * 1000;
-    const produced = totalProduction(this.state) * dtSeconds;
-    if (produced > 0) {
-      this.state.rp += produced;
-      this.state.totalRP += produced;
+    this.state.totalPlayMs += dtSeconds * 1000;
+    // Décompte du boost temporaire « Eurêka ».
+    if (this.state.boostSecondsLeft > 0) {
+      this.state.boostSecondsLeft = Math.max(0, this.state.boostSecondsLeft - dtSeconds);
+      if (this.state.boostSecondsLeft === 0) this.state.boostMult = 1;
     }
+    const rps = totalProduction(this.state);
+    if (rps > this.state.bestRps) this.state.bestRps = rps;
+    gainRP(this.state, rps * dtSeconds);
     // Clics automatiques (méta) : valent un vrai clic, sans compter dans totalClicks.
     applyAutoClicks(this.state, metaAutoClicksPerSec(this.state) * dtSeconds);
     this.checkAchievements();

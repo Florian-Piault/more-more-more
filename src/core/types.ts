@@ -50,6 +50,25 @@ export interface UpgradeDef {
   readonly unlock: Condition;
 }
 
+/**
+ * Recherche continue : amélioration répétable sans plafond, au coût croissant.
+ * L'effet est appliqué `factor^niveau` (croissance composée → ressenti log).
+ */
+export interface ResearchDef {
+  readonly id: string;
+  readonly name: string;
+  readonly description: string;
+  readonly icon: LucideIcon;
+  readonly baseCost: number;
+  readonly costGrowth: number;
+  /** Effet multiplicatif par niveau (production globale ou clic). */
+  readonly effect:
+    | { readonly kind: "globalMult"; readonly factor: number }
+    | { readonly kind: "clickMult"; readonly factor: number };
+  /** La recherche apparaît quand cette condition est vraie. */
+  readonly unlock: Condition;
+}
+
 export interface AchievementDef {
   readonly id: string;
   readonly name: string;
@@ -113,9 +132,15 @@ export interface GameState {
   totalClicks: number;
   /** Temps de run actif écoulé (ms), accumulé par le moteur, remis à 0 au prestige. */
   runMs: number;
+  /** Multiplicateur de production temporaire (boost « Eurêka ») ; 1 = aucun. */
+  boostMult: number;
+  /** Secondes restantes du boost temporaire (décrémenté par le moteur). */
+  boostSecondsLeft: number;
   /** Quantité possédée par générateur (id → count). */
   generators: Record<string, number>;
   ownedUpgrades: Record<string, true>;
+  /** Niveau acheté par recherche continue (id → niveau). */
+  research: Record<string, number>;
   unlockedAchievements: Record<string, true>;
   /** Cumul de Percées GAGNÉES (jamais perdu) — pilote le +2% passif. */
   breakthroughs: number;
@@ -126,6 +151,12 @@ export interface GameState {
   /** Cumul de Percées dépensées (pour conditions d'accomplissement). */
   metaPointsSpent: number;
   prestigeCount: number;
+  /** Compteurs « à vie » (jamais réinitialisés au prestige), pour les statistiques. */
+  lifetimeRP: number;
+  lifetimeClicks: number;
+  totalPlayMs: number;
+  /** Meilleure production/s atteinte. */
+  bestRps: number;
   lastSaved: number;
   settings: Settings;
 }

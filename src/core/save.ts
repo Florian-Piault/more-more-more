@@ -1,6 +1,6 @@
 import type { GameState } from "@/core/types";
 import { createInitialState } from "@/core/state";
-import { totalProduction } from "@/core/economy";
+import { gainRP, totalProduction } from "@/core/economy";
 import { metaOfflineCapHours, metaOfflineRate } from "@/core/meta";
 
 const STORAGE_KEY = "more-more-more:save";
@@ -19,6 +19,7 @@ function migrate(loaded: Partial<GameState>): GameState {
     ...loaded,
     generators: { ...loaded.generators },
     ownedUpgrades: { ...loaded.ownedUpgrades },
+    research: { ...loaded.research },
     unlockedAchievements: { ...loaded.unlockedAchievements },
     metaUpgrades: { ...loaded.metaUpgrades },
     settings: { ...fresh.settings, ...loaded.settings },
@@ -64,8 +65,7 @@ export function applyOfflineProgress(state: GameState, now: number): OfflineRepo
   if (elapsed <= 0) return null;
   const gained = totalProduction(state) * (elapsed / 1000) * rate;
   if (gained <= 0) return null;
-  state.rp += gained;
-  state.totalRP += gained;
+  gainRP(state, gained);
   return { durationMs: elapsed, gained };
 }
 

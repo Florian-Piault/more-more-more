@@ -97,6 +97,45 @@ body {
   gap: 8px;
 }
 
+.panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.panel__head .panel__title {
+  margin-bottom: 0;
+}
+
+.buy-mode {
+  display: inline-flex;
+  gap: 2px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px;
+}
+.buy-mode__btn {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 3px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.buy-mode__btn:hover {
+  color: var(--text);
+}
+.buy-mode__btn.is-active {
+  background: var(--cyan);
+  color: #06121a;
+}
+
 /* ---- Topbar ------------------------------------------------------------- */
 
 .topbar {
@@ -198,6 +237,82 @@ body {
   letter-spacing: 0.08em;
   opacity: 0.6;
 }
+.stats__boost {
+  margin-top: 4px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--gold);
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 12px rgba(251, 191, 36, 0.5);
+}
+.stats__boost.is-active {
+  animation: boost-pulse 1s ease-in-out infinite;
+}
+@keyframes boost-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+/* ---- Panneau Statistiques ---------------------------------------------- */
+
+.stats-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.stats-grid__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 0.82rem;
+  padding: 2px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+.stats-grid__key {
+  color: var(--text-dim);
+}
+.stats-grid__val {
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Événement « Eurêka » ---------------------------------------------- */
+
+.eureka {
+  position: fixed;
+  z-index: 60;
+  width: 56px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid var(--gold);
+  background: radial-gradient(circle at 30% 30%, rgba(251, 191, 36, 0.35), rgba(251, 191, 36, 0.08));
+  color: var(--gold);
+  cursor: pointer;
+  box-shadow: 0 0 22px rgba(251, 191, 36, 0.55);
+  animation: eureka-in 0.3s ease-out, eureka-bob 2.4s ease-in-out infinite 0.3s;
+  transition: transform 0.12s;
+}
+.eureka:hover {
+  transform: scale(1.12);
+}
+.eureka--leaving {
+  animation: eureka-out 0.35s ease-in forwards;
+}
+@keyframes eureka-in {
+  from { transform: scale(0); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+@keyframes eureka-out {
+  to { transform: scale(0.4); opacity: 0; }
+}
+@keyframes eureka-bob {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 -8px; }
+}
 
 .flask-btn {
   --size: 200px;
@@ -293,6 +408,22 @@ body {
   font-size: 0.85rem;
   color: var(--gold);
   font-variant-numeric: tabular-nums;
+}
+.gen__bar {
+  margin-top: 6px;
+  height: 3px;
+  width: 100%;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.gen__bar-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--cyan);
+  opacity: 0.7;
+  border-radius: 2px;
+  transition: width 0.25s ease-out;
 }
 .gen:hover:not([disabled]) {
   transform: translateX(2px);

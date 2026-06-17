@@ -13,26 +13,31 @@ import {
 import type { GameState, MetaBranch } from "@/core/types";
 import { GENERATORS } from "@/data/generators";
 import { UPGRADES } from "@/data/upgrades";
+import { RESEARCH } from "@/data/research";
 import { ACHIEVEMENTS } from "@/data/achievements";
 import { META_UPGRADES } from "@/data/metaUpgrades";
 import {
+  bulkCost,
   clickValue,
   generatorProduction,
+  maxAffordable,
+  MILESTONE_STEP,
   milestoneMultiplier,
-  nextCost,
+  researchCost,
   totalProduction,
   untilNextMilestone,
 } from "@/core/economy";
 import { generatorCount, evalCondition, metaLevel } from "@/core/state";
 import { metaCost, metaUnlocked, canBuyMeta, metaMilestoneBase } from "@/core/meta";
 import { canPrestige, pendingBreakthroughs, PRESTIGE_THRESHOLD } from "@/core/prestige";
-import { formatNumber, formatClock } from "@/ui/format";
+import { formatNumber, formatClock, formatDuration } from "@/ui/format";
 import { icon, pop, attachTooltip } from "@/ui/juice";
 
 export interface RenderCallbacks {
   onClick: (clientX: number, clientY: number) => void;
-  onBuyGenerator: (id: string) => void;
+  onBuyGenerator: (id: string, qty: number | "max") => void;
   onBuyUpgrade: (id: string) => void;
+  onBuyResearch: (id: string) => void;
   onPrestige: () => void;
   onToggleMute: () => void;
   onToggleNotation: () => void;
@@ -49,19 +54,26 @@ interface GenRow {
   cost: HTMLElement;
   prod: HTMLElement;
   milestone: HTMLElement;
+  barFill: HTMLElement;
   revealed: boolean;
 }
+
+/** Mode d'achat groupé des générateurs. */
+type BuyMode = 1 | 10 | "max";
 
 export class Renderer {
   private rpEl!: HTMLElement;
   private rpsEl!: HTMLElement;
   private runTimeEl!: HTMLElement;
+  private boostEl!: HTMLElement;
   private clickHintEl!: HTMLElement;
   private muteBtn!: HTMLButtonElement;
   private notationBtn!: HTMLButtonElement;
   private clickBtn!: HTMLButtonElement;
 
   private genRows = new Map<string, GenRow>();
+  private buyMode: BuyMode = 1;
+  private buyModeBtns = new Map<BuyMode, HTMLButtonElement>();
   private upgradeList!: HTMLElement;
   private upgradeNodes = new Map<string, HTMLElement>();
   private ownedUpgradeList!: HTMLElement;
@@ -79,6 +91,13 @@ export class Renderer {
   private metaPointsLabel!: HTMLElement;
   private metaNodes = new Map<string, { root: HTMLElement; level: HTMLElement; cost: HTMLElement }>();
   private metaOpen = false;
+  private researchPanel!: HTMLElement;
+  private researchList!: HTMLElement;
+  private researchNodes = new Map<
+    string,
+    { root: HTMLButtonElement; desc: HTMLElement; cost: HTMLElement }
+  >();
+  private statValues = new Map<string, HTMLElement>();
 
   /** Valeur de RP affichée (tweenée vers la valeur réelle pour la fluidité). */
   private displayedRP = 0;
@@ -96,6 +115,8 @@ export class Renderer {
     this.ownedUpgradeNodes.clear();
     this.achievementNodes.clear();
     this.metaNodes.clear();
+    this.researchNodes.clear();
+    this.statValues.clear();
     this.metaOpen = false;
     this.root.innerHTML = "";
     this.root.className = "layout";
@@ -166,7 +187,9 @@ export class Renderer {
       title: "Temps de run",
       body: "Temps de jeu actif depuis le dernier prestige (le hors-ligne ne compte pas).",
     });
-    stats.append(rpLabel, this.rpEl, this.rpsEl, this.runTimeEl);
+    this.boostEl = document.createElement("div");
+    this.boostEl.className = "stats__boost";
+    stats.append(rpLabel, this.rpEl, this.rpsEl, this.runTimeEl, this.boostEl);
 
     this.clickBtn = document.createElement("button");
     this.clickBtn.className = "flask-btn";
@@ -189,10 +212,14 @@ export class Renderer {
   private buildGeneratorsColumn(): HTMLElement {
     const col = document.createElement("section");
     col.className = "col col--generators panel";
+    const head = document.createElement("div");
+    head.className = "panel__head";
     const h = document.createElement("h2");
     h.className = "panel__title";
     h.textContent = "Générateurs";
-    col.appendChild(h);
+    head.appendChild(h);
+    head.appendChild(this.buildBuyModeSelector());
+    col.appendChild(head);
 
     for (const def of GENERATORS) {
       const row = document.createElement("button");
@@ -208,7 +235,12 @@ export class Renderer {
       prod.className = "gen__prod";
       const milestone = document.createElement("div");
       milestone.className = "gen__milestone";
-      info.append(name, prod, milestone);
+      const bar = document.createElement("div");
+      bar.className = "gen__bar";
+      const barFill = document.createElement("div");
+      barFill.className = "gen__bar-fill";
+      bar.appendChild(barFill);
+      info.append(name, prod, milestone, bar);
 
       const right = document.createElement("div");
       right.className = "gen__right";
@@ -220,14 +252,39 @@ export class Renderer {
 
       row.append(info, right);
       row.addEventListener("click", () => {
-        this.cb.onBuyGenerator(def.id);
+        this.cb.onBuyGenerator(def.id, this.buyMode);
         pop(row);
       });
 
       col.appendChild(row);
-      this.genRows.set(def.id, { root: row, count, cost, prod, milestone, revealed: false });
+      this.genRows.set(def.id, { root: row, count, cost, prod, milestone, barFill, revealed: false });
     }
     return col;
+  }
+
+  /** Boutons ×1 / ×10 / Max pilotant la quantité d'achat des générateurs. */
+  private buildBuyModeSelector(): HTMLElement {
+    const wrap = document.createElement("div");
+    wrap.className = "buy-mode";
+    this.buyModeBtns.clear();
+    const modes: { mode: BuyMode; label: string }[] = [
+      { mode: 1, label: "×1" },
+      { mode: 10, label: "×10" },
+      { mode: "max", label: "Max" },
+    ];
+    for (const { mode, label } of modes) {
+      const btn = document.createElement("button");
+      btn.className = "buy-mode__btn";
+      btn.textContent = label;
+      btn.classList.toggle("is-active", mode === this.buyMode);
+      btn.addEventListener("click", () => {
+        this.buyMode = mode;
+        for (const [m, b] of this.buyModeBtns) b.classList.toggle("is-active", m === mode);
+      });
+      this.buyModeBtns.set(mode, btn);
+      wrap.appendChild(btn);
+    }
+    return wrap;
   }
 
   // ---- Colonne droite : améliorations + prestige + accomplissements --------
@@ -283,6 +340,17 @@ export class Renderer {
     upPanel.append(upTitle, this.upgradeList, this.ownedUpgradeLabel, this.ownedUpgradeList);
     col.appendChild(upPanel);
 
+    // Recherche continue (répétable). Masquée tant qu'aucune n'est débloquée.
+    this.researchPanel = document.createElement("div");
+    this.researchPanel.className = "panel is-hidden";
+    const rTitle = document.createElement("h2");
+    rTitle.className = "panel__title";
+    rTitle.textContent = "Recherche continue";
+    this.researchList = document.createElement("div");
+    this.researchList.className = "upgrades";
+    this.researchPanel.append(rTitle, this.researchList);
+    col.appendChild(this.researchPanel);
+
     // Accomplissements
     const achPanel = document.createElement("div");
     achPanel.className = "panel";
@@ -308,7 +376,46 @@ export class Renderer {
     achPanel.append(achTitle, this.achievementGrid);
     col.appendChild(achPanel);
 
+    // Statistiques
+    col.appendChild(this.buildStatsPanel());
+
     return col;
+  }
+
+  /** Panneau récapitulatif des statistiques (valeurs mises à jour par updateStats). */
+  private buildStatsPanel(): HTMLElement {
+    const panel = document.createElement("div");
+    panel.className = "panel";
+    const title = document.createElement("h2");
+    title.className = "panel__title";
+    title.textContent = "Statistiques";
+    const grid = document.createElement("div");
+    grid.className = "stats-grid";
+    const rows = [
+      "Production/s",
+      "Record prod/s",
+      "RP cette run",
+      "RP cumulés (à vie)",
+      "Clics (à vie)",
+      "Percées gagnées",
+      "Prestiges",
+      "Temps de run",
+      "Temps de jeu total",
+    ];
+    for (const label of rows) {
+      const row = document.createElement("div");
+      row.className = "stats-grid__row";
+      const k = document.createElement("span");
+      k.className = "stats-grid__key";
+      k.textContent = label;
+      const v = document.createElement("span");
+      v.className = "stats-grid__val";
+      row.append(k, v);
+      grid.appendChild(row);
+      this.statValues.set(label, v);
+    }
+    panel.append(title, grid);
+    return panel;
   }
 
   // ---- Modale : arbre de méta-améliorations --------------------------------
@@ -437,12 +544,38 @@ export class Renderer {
     this.rpsEl.textContent = `${formatNumber(totalProduction(state), sci)} / s`;
     this.clickHintEl.textContent = `+${formatNumber(clickValue(state), sci)} par expérience`;
     this.runTimeEl.textContent = formatClock(state.runMs);
+    // Indicateur de boost « Eurêka » actif.
+    if (state.boostSecondsLeft > 0) {
+      this.boostEl.textContent = `Frénésie ×${formatNumber(state.boostMult, sci)} · ${Math.ceil(state.boostSecondsLeft)} s`;
+      this.boostEl.classList.add("is-active");
+    } else {
+      this.boostEl.textContent = "";
+      this.boostEl.classList.remove("is-active");
+    }
 
     this.updateGenerators(state, sci);
     this.updateUpgrades(state, sci);
+    this.updateResearch(state, sci);
     this.updatePrestige(state, sci);
     this.updateAchievements(state);
     this.updateMeta(state, sci);
+    this.updateStats(state, sci);
+  }
+
+  private updateStats(state: GameState, sci: boolean): void {
+    const set = (k: string, v: string) => {
+      const el = this.statValues.get(k);
+      if (el) el.textContent = v;
+    };
+    set("Production/s", `${formatNumber(totalProduction(state), sci)} / s`);
+    set("Record prod/s", `${formatNumber(state.bestRps, sci)} / s`);
+    set("RP cette run", formatNumber(state.totalRP, sci));
+    set("RP cumulés (à vie)", formatNumber(state.lifetimeRP, sci));
+    set("Clics (à vie)", formatNumber(state.lifetimeClicks, sci));
+    set("Percées gagnées", formatNumber(state.breakthroughs, sci));
+    set("Prestiges", formatNumber(state.prestigeCount, sci));
+    set("Temps de run", formatClock(state.runMs));
+    set("Temps de jeu total", formatDuration(state.totalPlayMs) || "—");
   }
 
   private updateGenerators(state: GameState, sci: boolean): void {
@@ -450,10 +583,14 @@ export class Renderer {
     for (const def of GENERATORS) {
       const row = this.genRows.get(def.id)!;
       const owned = generatorCount(state, def.id);
-      const cost = nextCost(state, def);
+      // Quantité visée selon le mode (Max ≥ 1 pour pouvoir afficher un coût).
+      const maxQty = maxAffordable(state, def);
+      const qty = this.buyMode === "max" ? Math.max(1, maxQty) : this.buyMode;
+      const cost = bulkCost(state, def, qty);
       // Révélation progressive : visible si déjà possédé, ou si le précédent est
-      // débloqué et qu'on atteint ≥ 40 % du coût.
-      const reachable = prevUnlocked && (owned > 0 || state.totalRP >= cost * 0.4);
+      // débloqué et qu'on atteint ≥ 40 % du coût d'un exemplaire.
+      const unitCost = bulkCost(state, def, 1);
+      const reachable = prevUnlocked && (owned > 0 || state.totalRP >= unitCost * 0.4);
       if (reachable && !row.revealed) {
         row.revealed = true;
         row.root.classList.add("is-revealed");
@@ -461,21 +598,26 @@ export class Renderer {
       row.root.classList.toggle("is-hidden", !row.revealed);
 
       row.count.textContent = String(owned);
-      row.cost.textContent = formatNumber(cost, sci);
+      const qtyLabel = this.buyMode === 1 ? "" : `${qty}× · `;
+      row.cost.textContent = `${qtyLabel}${formatNumber(cost, sci)}`;
       row.prod.textContent = `${formatNumber(generatorProduction(state, def), sci)} / s`;
 
-      // Palier : multiplicateur actuel + compte à rebours vers le prochain palier.
+      // Palier : multiplicateur actuel + compte à rebours + barre de progression.
       if (owned > 0) {
         const base = metaMilestoneBase(state);
         const mult = milestoneMultiplier(owned, base);
         const left = untilNextMilestone(owned);
         const multLabel = mult > 1 ? `Palier ×${formatNumber(mult, sci)} · ` : "";
         row.milestone.textContent = `${multLabel}×${base} dans ${left}`;
+        row.barFill.style.width = `${((MILESTONE_STEP - left) / MILESTONE_STEP) * 100}%`;
       } else {
         row.milestone.textContent = "";
+        row.barFill.style.width = "0%";
       }
-      row.root.toggleAttribute("disabled", state.rp < cost);
-      row.root.classList.toggle("is-affordable", state.rp >= cost && row.revealed);
+      // En mode Max non abordable, qty=1 mais maxQty=0 → on désactive.
+      const affordable = this.buyMode === "max" ? maxQty >= 1 : state.rp >= cost;
+      row.root.toggleAttribute("disabled", !affordable);
+      row.root.classList.toggle("is-affordable", affordable && row.revealed);
 
       prevUnlocked = owned > 0;
     }
@@ -525,6 +667,48 @@ export class Renderer {
       node.toggleAttribute("disabled", state.rp < up.cost);
       node.classList.toggle("is-affordable", state.rp >= up.cost);
     }
+  }
+
+  private updateResearch(state: GameState, sci: boolean): void {
+    let anyVisible = false;
+    for (const def of RESEARCH) {
+      const lvl = state.research[def.id] ?? 0;
+      // Apparaît au déblocage, puis reste visible (même au niveau 0 acheté).
+      if (lvl === 0 && !evalCondition(state, def.unlock) && !this.researchNodes.has(def.id)) {
+        continue;
+      }
+      anyVisible = true;
+      const cost = researchCost(state, def);
+
+      let node = this.researchNodes.get(def.id);
+      if (!node) {
+        const root = document.createElement("button");
+        root.className = "upgrade is-revealed";
+        root.appendChild(icon(def.icon, 22));
+        const text = document.createElement("div");
+        text.className = "upgrade__text";
+        const name = document.createElement("div");
+        name.className = "upgrade__name";
+        name.textContent = def.name;
+        const desc = document.createElement("div");
+        desc.className = "upgrade__desc";
+        desc.textContent = def.description;
+        const costEl = document.createElement("div");
+        costEl.className = "upgrade__cost";
+        text.append(name, desc, costEl);
+        root.appendChild(text);
+        root.addEventListener("click", () => this.cb.onBuyResearch(def.id));
+        this.researchList.appendChild(root);
+        node = { root, desc, cost: costEl };
+        this.researchNodes.set(def.id, node);
+      }
+
+      node.desc.textContent = `${def.description} — Niv. ${formatNumber(lvl, sci)}`;
+      node.cost.textContent = formatNumber(cost, sci);
+      node.root.toggleAttribute("disabled", state.rp < cost);
+      node.root.classList.toggle("is-affordable", state.rp >= cost);
+    }
+    this.researchPanel.classList.toggle("is-hidden", !anyVisible);
   }
 
   private updatePrestige(state: GameState, sci: boolean): void {

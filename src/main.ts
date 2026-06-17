@@ -2,7 +2,15 @@ import "@/styles/style.css";
 import type { GameState } from "@/core/types";
 import { createInitialState } from "@/core/state";
 import { Engine } from "@/core/engine";
-import { applyClick, buyGenerator, buyUpgrade } from "@/core/economy";
+import {
+  applyClick,
+  buyGeneratorBulk,
+  buyResearch,
+  buyUpgrade,
+  clickValue,
+  gainRP,
+  totalProduction,
+} from "@/core/economy";
 import { performPrestige, pendingBreakthroughs } from "@/core/prestige";
 import { buyMetaUpgrade } from "@/core/meta";
 import {
@@ -25,7 +33,8 @@ import {
   sndAchievement,
   sndPrestige,
 } from "@/ui/audio";
-import { Lightbulb, Clock } from "lucide";
+import { startEurekaEvents } from "@/ui/events";
+import { Lightbulb, Clock, Sparkles, Zap } from "lucide";
 
 const appEl = document.getElementById("app");
 if (!appEl) throw new Error("Élément #app introuvable");
@@ -44,11 +53,14 @@ const renderer = new Renderer(appEl, {
     floatText(`+${formatNumber(gain, state.settings.scientificNotation)}`, x, y);
     sndClick();
   },
-  onBuyGenerator: (id) => {
-    if (buyGenerator(state, id)) sndBuy();
+  onBuyGenerator: (id, qty) => {
+    if (buyGeneratorBulk(state, id, qty) > 0) sndBuy();
   },
   onBuyUpgrade: (id) => {
     if (buyUpgrade(state, id)) sndUpgrade();
+  },
+  onBuyResearch: (id) => {
+    if (buyResearch(state, id)) sndUpgrade();
   },
   onPrestige: () => {
     const pending = pendingBreakthroughs(state);
@@ -146,6 +158,35 @@ if (offline) {
     duration: 6000,
   });
 }
+
+// --- Événements « Eurêka » --------------------------------------------------
+startEurekaEvents((reward) => {
+  sndAchievement();
+  if (reward.kind === "frenzy") {
+    // On prend la durée la plus longue si un boost est déjà actif.
+    state.boostMult = reward.factor;
+    state.boostSecondsLeft = Math.max(state.boostSecondsLeft, reward.seconds);
+    toast({
+      title: "Frénésie !",
+      body: `Production ×${reward.factor} pendant ${reward.seconds} s.`,
+      iconNode: Zap,
+      kind: "achievement",
+      duration: 5000,
+    });
+  } else {
+    // Cagnotte : crédit instantané valant `seconds` de production,
+    // avec un plancher pour rester utile en début de partie.
+    const gain = Math.max(totalProduction(state) * reward.seconds, clickValue(state) * 25);
+    gainRP(state, gain);
+    toast({
+      title: "Eurêka !",
+      body: `Découverte fortuite : +${formatNumber(gain, state.settings.scientificNotation)} RP.`,
+      iconNode: Sparkles,
+      kind: "achievement",
+      duration: 5000,
+    });
+  }
+});
 
 // --- Sauvegarde à la fermeture ---------------------------------------------
 window.addEventListener("beforeunload", () => saveState(state, Date.now()));
